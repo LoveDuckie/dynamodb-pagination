@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Public blog MVC on AWS Lambda, DynamoDB bidirectional cursors, SSM and KMS
+
+Resources:
+  BlogItems:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  DataProtectionKmsKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Encrypt SSM SecureString values containing Data Protection keys
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowAccountIamPolicies
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: '*'
+
+  DataProtectionKmsAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/${AWS::StackName}-blog-dataprotection
+      TargetKeyId: !Ref DataProtectionKmsKey
+
+  BlogFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/BlogLambda/
+      Handler: BlogLambda
+      Runtime: dotnet10
+      Architectures: [x86_64]
+      MemorySize: 512
+      Timeout: 30
+      Environment:
+        Variables:
+          DOTNET_ENVIRONMENT: Production
+          ASPNETCORE_ENVIRONMENT: Production
+          DynamoDb__TableName: !Ref BlogItems
+          # Both settings are read by Program.cs when Lambda starts.
+          # SSM path: the key ring is stored as *separate* SecureString entries
+          # under this prefix, not as one plaintext HMAC secret.
+          DataProtection__ParameterPath: !Sub /${AWS::StackName}/dataprotection/keys
+          # KMS key *ARN* to use for encrypting new SSM key-ring entries.
+          DataProtection__KmsKeyArn: !GetAtt DataProtectionKmsKey.Arn
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            - Sid: ReadPublicBlogItems
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+              Resource: !GetAtt BlogItems.Arn
+            - Sid: ReadWriteDataProtectionKeys
+              Effect: Allow
+              Action:
+                - ssm:GetParametersByPath
+                - ssm:PutParameter
+              Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/dataprotection/keys/*
+            - Sid: UseKmsViaSsm
+              Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:GenerateDataKey
+              Resource: !GetAtt DataProtectionKmsKey.Arn
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+      Events:
+        Routes:
+          Type: HttpApi
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+
+Outputs:
+  BlogTableName:
+    Value: !Ref BlogItems
+  BlogExampleUrl:
+    Value: !Sub https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/users/alice/posts
+  DataProtectionKeyArn:
+    Value: !GetAtt DataProtectionKmsKey.Arn
+  DataProtectionParameterPath:
+    Description: SSM Parameter Store prefix that contains Data Protection key-ring entries
+    Value: !Sub /${AWS::StackName}/dataprotection/keys

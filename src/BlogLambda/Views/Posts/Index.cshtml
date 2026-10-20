@@ -1,0 +1,58 @@
+@model BlogPostsPageViewModel
+@{
+    Layout = null;
+}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>@Model.Author.DisplayName's blog</title>
+  <style>
+    body { margin: 3rem auto; padding: 0 1rem; max-width: 46rem; font: 16px/1.55 system-ui, sans-serif; color: #1b2533; }
+    article { padding: 1.25rem 0; border-bottom: 1px solid #d9dfe6; }
+    h1 { margin-bottom: 0; }
+    .meta { color: #5b6574; font-size: .9rem; }
+    nav { display: flex; justify-content: space-between; margin: 2rem 0; }
+    nav a { padding: .65rem 1rem; border: 1px solid #b8c3d1; border-radius: .5rem; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>@Model.Author.DisplayName</h1>
+    <p class="meta">@@@Model.Author.Handle · Posts sorted by creation time (newest first)</p>
+  </header>
+  <main>
+    @if (Model.Posts.Count == 0)
+    {
+      <p>No posts found on this page.</p>
+    }
+    @foreach (var post in Model.Posts)
+    {
+      <article>
+        <h2>@post.Title</h2>
+        <p class="meta">Created: @post.CreatedAtUtc.ToString("u") · Last updated: @post.LastUpdatedAtUtc.ToString("u")</p>
+        <p>@post.Excerpt</p>
+      </article>
+    }
+  </main>
+  <nav aria-label="Pagination">
+    <div>
+      @if (Model.PreviousCursor is not null)
+      {
+        <a asp-controller="Posts" asp-action="Index"
+           asp-route-userId="@Model.Author.Id"
+           asp-route-cursor="@Model.PreviousCursor">← Previous</a>
+      }
+    </div>
+    <div>
+      @if (Model.NextCursor is not null)
+      {
+        <a asp-controller="Posts" asp-action="Index"
+           asp-route-userId="@Model.Author.Id"
+           asp-route-cursor="@Model.NextCursor">Next →</a>
+      }
+    </div>
+  </nav>
+</body>
+</html>
